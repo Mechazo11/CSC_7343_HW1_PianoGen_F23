@@ -205,7 +205,7 @@ class Critic(CriticBase):
 # ------------------------------------------------ EOF Critic -------------------------------------------------------
 
 class ComposerLSTM(nn.Module):
-    def __init__(self, seq_len = 50, hidden_size=256, num_layers=2, dense_size = 382, emb_dim = 15, vocab_size = 382):
+    def __init__(self, seq_len = 50, hidden_size=64, num_layers=2, dense_size = 128, emb_dim = 10, vocab_size = 382):
         super(ComposerLSTM, self).__init__()
         # Based on https://www.youtube.com/watch?v=euwN5DHfLEo&t=111s&ab_channel=mildlyoverfitted
         #* To make a prediction, at least a sequence of 50 piano notes must be passed in
@@ -235,7 +235,10 @@ class ComposerLSTM(nn.Module):
         #* Check basics.ipynb to find out why these two layers are defined like this
         self.linear_1 = nn.Linear(self.seq_len, self.dense_dim)
         self.linear_2 = nn.Linear(self.dense_dim, self.vocab_size) # Outputs logits over all notes in the vocabulary
-    
+
+        # Softmax layer
+        self.softmax = nn.Softmax(dim = 1)
+
     # This method takes data through one forward pass 
     def forward(self, x):
         """
@@ -256,6 +259,8 @@ class ComposerLSTM(nn.Module):
         oo_mean = oo.mean(dim = 2) # [batch_size, seq_len]
         
         fc_out = self.linear_1(oo_mean) # (seq_len, dense_dim)
+        # TODO test with leaky relu
+        # https://pytorch.org/docs/stable/generated/torch.nn.LeakyReLU.html
         fc_out = F.relu(fc_out) # Relu activation
         logits = self.linear_2(fc_out) # logits (dense_dim, vocab_size)
         
@@ -283,11 +288,7 @@ class Composer(ComposerBase):
         self.model = ComposerLSTM(seq_len=seq_len)
         self.model = self.model.to(device)
         
-        # TODO download weights from file
-        url = ""
-
         # Set a convergence threshold for loss
-        self.in_action = None # Keeps a class wide copy of in_action one-hot encodings
         self.convergence_threshold = conv_val
         self.load_trained = load_trained
         
@@ -302,6 +303,7 @@ class Composer(ComposerBase):
         # Load model if load_trained is True, else construct the model
         if (load_trained):
             
+            file_id = "1EMLxoMZ5CaX49yckSwdfE7AL7vhvVVnN"
            
             #* Load a pretrained model
             """
@@ -310,11 +312,10 @@ class Composer(ComposerBase):
             else, construct the model
             """
             #* As suggested by Teslim from the class
-            #gdd.download_file_from_google_drive(file_id=url,dest_path='./az_cps.pth',unzip=True)
-            #self.model.load_state_dict(torch.load("./az_cps.pth"))
-            pass
-        
-        # print(self.model)
+            gdd.download_file_from_google_drive(file_id=file_id, dest_path='./az_cps.pth',unzip=True)
+            self.model.load_state_dict(torch.load("./az_cps.pth"))
+
+        print(self.model)
     
     # # Inherited from the BaseModel class
     # #* Will be called multiple times by the fit method
@@ -348,31 +349,98 @@ class Composer(ComposerBase):
         
         return loss
     
-    def compose(self, n):
+    def compose(self, n = 200):
         
         '''
         Generate a music sequence
         :param n: length of the sequence to be generated
         :return: the generated sequence
         '''
-        #y_pred_indicies = torch.argmax(probs.cpu(), dim=1).view(-1,1).detach().numpy()
-        #y_pred = torch.tensor([self.notes[i] for i in y_pred_indicies]).detach()
-        #print(y_pred.shape)
+        # Pull vocabulary from model instance
+        # notes_vocab = self.notes
+
+        print(f"Number of notes in Composer vocabulary: {len(self.notes)}")
+
+        if n % 50 == 0:
+            print(f"Sequence length is completely divisible by 50")
+            quos = n//50 # Floor division
+        else:
+            print(f"Sequence length not completely divisible by 50")
+            quos = n//50 # Floor division
+            n = quos * 50 # This number is now divisible by 50
+
+        midi_notes = [] # Master list that will hold all the notes in the sequence
+
+        # Initialize working tensor
+        midi_in = torch.zeros(50, dtype=torch.long).to(device) # ([50])
+
+        # Choose the starting note
+        first_notes_lss = [256,257,258,259,260,261,262,263,264] # Found from data analysis
+        first_note = np.random.choice(first_notes_lss)
+
+        # Push this note final event list
+        midi_notes.append(first_note)
+
+        # Push first note into the work tensor
+        midi_in[0] = torch.tensor(first_note, dtype=torch.long)
+
+        #* Our model was trained for a sequence of valid note sequence
+        #* Just passing [256, 0,0, ....... 0] yeilds a nonsense sequence
+
+        #* Version 1: Use only random piano notes
+
+        rand_seq= piano2seq(random_piano(n=49)) #! Generates a lot more piano notes than specified
+        rand_seq = rand_seq[:49]
+        # Add this part to the main event list
+
+        ## We can choose to push only a subset or all of it
+        for nn in rand_seq:
+            midi_notes.append(nn)
+
+        ## Update the work tensor
+        midi_in[1:] = torch.from_numpy(rand_seq)
+
+        #* Version 2 start with a good piano sequence from the database
+        #* Objectively workse
+        # midi_load = process_midi_seq(datadir=root, n=1, maxlen=49)
+        # # Update main list
+        # for nn in midi_load[0][:49]:
+        #     midi_notes.append(nn)
         
-        # y_pred = torch.argmax(probs, dim=1).view(-1,1).numpy() # Needed for inference
-        # print()
-        # print(y_pred.shape)
-        pass
+        # # Update work tensor
+        # midi_in[1:] = torch.from_numpy(midi_load[0][:49])
+
+        # How many notes remains?
+        n = n - 50
+
+        # Set model to evaluation mode, we only want to infer
+        self.model.eval() 
+        
+        # Get new notes
+        for i in range(n): # Count it now n - 1
+            midi_in = midi_in.to(device) # Put work tensor to GPU
+            with torch.no_grad():
+                in_seq = midi_in.clone().view(1,-1) # Copy without referece, convert to a batched input
+                probs = self.model(in_seq) # Inferece, output logits
+            
+            midi_in = midi_in.cpu() # Pull midi_in from CPU for processing
+            probs = self.model.softmax(probs) # Apply softmax to scale all logits between 0 and 1.
+            probs = probs.detach().cpu() # Detach from computation graph move tensor to CPU
+            next_note_pred = self.notes[torch.argmax(probs).item()] # Scalar, piano note
+            # print(f"next_note: {next_note_pred}")
+
+            # Push this note to master list
+            midi_notes.append(next_note_pred)
+
+            # Update work tensor and shift event sequence by one note forward
+            next_note_tensor= torch.tensor(next_note_pred ,dtype=torch.long)
+            midi_in = torch.cat((midi_in, next_note_tensor.unsqueeze(-1)),dim = 0)
+            midi_in = midi_in[1:] # Shift by one position forward
+        
+        return np.array(midi_notes) # Numpy 1D array
+
     
     # ------------------------------------------------ EOF Composer -------------------------------------------------------
-
-
-# 10_08 this version does not work
-# self.input_size = input_size # Input tensor size
-# self.num_layers = num_layers # Number of recurrent layers, we are using 3
-# self.hidden_size = hidden_size # Number of states in the hidden layer
-# self.num_classes = 294 # This is an autoregressor, the output from LSTM unit should be another piano note
-        
 
 # ------------------------------------------------------------ EOF --------------------------------------------------
 #! # WORKS DO NOT DELETE
@@ -398,127 +466,3 @@ class Composer(ComposerBase):
     #     return loss
 
 
-# -------------------------- This version did not work ------------------------
-        # m = x.shape[0] # Batch size
-        # sample_cnt = x.shape[1]
-
-        # # print(f"in seq data shape: {x.shape}")
-        # # print(x)
-        # # print()      
-
-        # # # print(f"input shape: {x_train.shape}")
-        # # print(x_train)
-        # # print()  
-
-        # #* Split into training and testing sequences
-        # x_train = x[:, :(sample_cnt - 1), :] .to(self.device).detach() # Get all elements except the last one 
-        # y_test = x[:, -1:, :].detach()  # Get only the last element (shape: [2, 1])
-        
-        # output = self(x_train) # 298 probabilities one for each of the unique notes
-        # output = output.detach()
-        # # print(f"output shape {output.shape}")
-        # # print()
-        
-        # # We have 2 training samples and for each we have 209 probability score.
-        # # For each sample we need to find the index of the maximum value
-        
-        # # Find the index of the maximum probability for each sample
-        # max_prob_indices = torch.argmax(output, dim=1)
-        
-        # # Retrieve the corresponding notes for each sample
-        # max_prob_notes = [self.unique_notes_list[idx.item()] for idx in max_prob_indices]
-        # y_pred_notes = torch.tensor(max_prob_notes).reshape(y_test.shape[0],1,1).float().detach()
-
-        # loss = self.loss_fn(y_pred_notes.view(-1, 1), y_test.view(-1,1))
-        # # Watchdog ??
-        
-        # print(f"loss: {loss.item()}") 
-        # print()
-        # -------------------------- This version did not work ------------------------
-
-# NO longer neeeded
-# #* Edward's version, may need to be depricited
-# class CriticSourceData():
-#     @staticmethod
-#     def preprocess(seed):
-#         expert_seq = process_midi_seq(datadir=root,maxlen=50, n=1000)
-#         fake_midix = [random_piano(seed) for i in range(20000)]
-#         fake_seq = process_midi_seq(all_midis=fake_midix,maxlen=50,n=1000)
-
-#         critic_data = np.zeros((expert_seq.shape[0] + fake_seq.shape[0], expert_seq.shape[1]+1))
-#         critic_data[:expert_seq.shape[0],:expert_seq.shape[1]] = expert_seq
-#         critic_data[expert_seq.shape[0]:,:expert_seq.shape[1]] = fake_seq
-#         critic_data[:expert_seq.shape[0],expert_seq.shape[1]] = 1
-
-#         train_sequences, test_sequences = train_test_split(critic_data , test_size=0.2)
-
-#         X_train = train_sequences[:,:51]
-#         X_train = X_train.reshape((-1,51,1))
-
-#         Y_train = train_sequences[:,51]
-#         Y_train = Y_train.reshape((-1,1))
-
-#         X_test = test_sequences[:,:51]
-#         X_test = X_test.reshape((-1,51,1))
-
-#         Y_test = test_sequences[:,51]
-#         Y_test = Y_test.reshape((-1,1))
-
-#         X_train = torch.tensor(X_train).float().to(device) 
-#         Y_train = torch.tensor(Y_train).float().to(device) 
-
-#         X_test = torch.tensor(X_test).float().to(device) 
-#         Y_test = torch.tensor(Y_test).float().to(device) 
-
-#         return X_train,Y_train,X_test,Y_test
-
-# #* Credit Edward Morgan
-# #* This may need to be depricited as it considers the model as a binary classifier
-# class CriticDataset(Dataset):
-#     def __init__(self, X_seq, Y_label):
-#         self.X_seq = X_seq
-#         self.Y_label = Y_label
-
-#     def __len__(self):
-#         return len(self.Y_label)
-        
-#     def __getitem__(self, idx):
-#         sequence, label =  self.X_seq[idx] ,self.Y_label[idx]
-#         label = np.array([1.0,0.0]) if label else np.array([0.0,1.0]) # One hot-encoding scheme??
-        
-#         return dict(
-#             sequence = sequence,
-#             label = label
-#         )
-
-
-# # Master method that performs the full training function
-    # def fit(self, loader, max_epochs):
-    #     # train_loader a Python list in list where each each x is a python list, where x[0] is the batch data
-    #     # model.train() is not requied to be set true
-    #     epochs = list(range(max_epochs))
-    #     min_epochs_to_run = 25
-    #     loss = None
-    #     for i in epochs:
-    #         for idx, batch in enumerate(loader):
-    #             #* in_action, the one hot encodings of each piano note
-    #             in_seq , in_action = batch['sequence'].to(self.device) , batch['action'].to(self.device)
-    #             self.in_action = in_action # Required by the train()
-    #             loss = self.train(in_seq)
-
-    #             self.optimizer.zero_grad()
-    #             # loss.requires_grad = True # Redundant?? Was required for my previous attempt
-    #             loss.backward()
-    #             self.optimizer.step()
-                
-    #              # Log message
-    #             print(f"Ephoc: {i} -> Batch: {idx} -> Loss:{loss}")
-    #             # Check for convergence based on loss
-                
-    #             # ------------------------------- End of 1 epoch ------------------------------
-                
-            
-    #         # Loss from last batch in this epoch
-    #         if ((loss.item() < self.convergence_threshold) and (i>min_epochs_to_run)):
-    #             print(f"Convergence reached. Stopping training.")
-    #             break
