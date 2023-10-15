@@ -57,67 +57,91 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 root = './' # Location of the root directory
 
 class CriticLSTM(nn.Module):
-    def __init__(self, num_classes = 2, input_size=1, hidden_size=51, num_layers=3): # Initialize with some default values
+    def __init__(self, seq_len = 50, hidden_size=64, num_layers=2, dense_size = 128, emb_dim = 10, vocab_size = 382): # Initialize with some default values
         super(CriticLSTM,self).__init__() # https://stackoverflow.com/questions/43080583/attributeerror-cannot-assign-module-before-module-init-call
         
-        #* LSTM Unit
-        # https://pytorch.org/docs/stable/generated/torch.nn.LSTM.html
+        # Based on https://www.youtube.com/watch?v=euwN5DHfLEo&t=111s&ab_channel=mildlyoverfitted
+        # Based on https://machinelearningmastery.com/building-a-binary-classification-model-in-pytorch/
+        #* To make a prediction, at least a sequence of 50 piano notes must be passed in
+        #self.input_size = input_size # Input size to LSTM for one timestep's data
         self.num_layers = num_layers # Number of recurrent layers, we are using 3
-        self.input_size = input_size # Input tensor size, for our case its 201
         self.hidden_size = hidden_size # Number of states in the hidden layer
+        self.vocab_size = vocab_size # Final output would be class that chooses one note from the available unique notes pool
+        self.emb_dim = emb_dim # Rule of thumb, a number between 7 ~ 19, the embedding size should be between the square root and the cube root of the number of categories
+        self.max_norm = 2 # Experimental
+        self.seq_len = seq_len # Number of notes in each sequence
+        self.dense_dim = dense_size # Number of neurons that immediately follows the LSTM network
         
-        #* Fully connected layer
-        # TODO this may be modified to become one class classifier problem
-        if (num_classes <2 or num_classes > 2):
-            print(f"Critic is a binary classifier, only two classes are allowed!")
-            self.num_classes = 2
-
-        self.num_classes = num_classes # 1 -- good music,0 -- bad music
-
-        # Define a 2 or 3 layer LSTM unit
-        self.LSTM = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True, dropout = 0.8) 
+        #* Embedding will encode each integer into a continous variable.
+        self.embedding = nn.Embedding(num_embeddings = self.vocab_size, 
+                                      embedding_dim = self.emb_dim)
         
-        # Define the output fully connected layer
-        self.FC = nn.Linear(self.hidden_size, self.num_classes)
-    
+        #* LSTM layer acts on the embeddings, not the category data themselves
+        self.lstm = nn.LSTM(input_size=self.emb_dim, hidden_size=self.hidden_size, 
+                            num_layers=self.num_layers, 
+                            batch_first=True, dropout = 0.3) 
+        
+        # Add batch normalization here
+        self.bn = nn.BatchNorm1d(hidden_size)  # Batch normalization layer
+
+        #* Take LSTM's output to a fully connected layer
+        #* Check basics.ipynb to find out why these two layers are defined like this
+        self.linear_1 = nn.Linear(self.seq_len, self.dense_dim)
+        self.linear_2 = nn.Linear(self.dense_dim, 1) # Connect logits to 1 neuron which will give probability
+        # NOTE we could have gone with another layer
+        # of the input belong to good music 1 or bad music 0
+        
+        # Rescale [(1)] vector to a probability score between 0 to 1
+        self.sigmoid = nn.Sigmoid()
+
     # This method takes data through one forward pass 
     def forward(self, x):
-        batch_size = x.size(0)
-        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device)
-        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device)
-        out, _ = self.LSTM(x, (h0, c0))
-        out = self.FC(out[:, -1, :])
+        # # Initial hidden and cell states
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(device)
+        c0 = torch.zeros(self.num_layers, x.size(0),  self.hidden_size).to(device)
         
-        #! Needs sigmoid here
+        emb = self.embedding(x) # [batch_size, seq_len, emb_dim]
+        oo,(_,_) = self.lstm(emb, (h0,c0))
+
+        oo = self.bn(oo.permute(0, 2, 1)).permute(0, 2, 1) # Batch normalize
+        oo_mean = oo.mean(dim = 2) # [batch_size, seq_len]
         
-        #out = torch.sigmoid(self.FC(out[:, -1, :])) # Now the output is between 0 and 1
+        fc_out = self.linear_1(oo_mean) # (seq_len, dense_dim)
+        # TODO test with leaky relu
+        # https://pytorch.org/docs/stable/generated/torch.nn.LeakyReLU.html
+        fc_out = F.relu(fc_out) # Relu activation
+        logits = self.linear_2(fc_out) # logits (dense_dim, vocab_size)
+        
+        out = self.sigmoid(logits) # logits, scaled to 0 - 1 shape -- [batch_size, 1]
+        out = out.view(-1) # Row vector, detached from computation graph
+        
         return out
 
 # Task 1: Critic LSTM
 # Input tensor --> LSTM Unit --> Fully connected layer --> 0 or 1
 # Most code adopted from https://saturncloud.io/blog/how-to-use-lstm-in-pytorch-for-classification/
 class Critic(CriticBase):
-    def __init__(self, load_trained = False, conv_val = 0.001): # Initialize with some default values
+    def __init__(self, seq_len = 50, load_trained = False, conv_val = 0.001): # Initialize with some default values
         super(Critic,self).__init__() # https://stackoverflow.com/questions/43080583/attributeerror-cannot-assign-module-before-module-init-call
         
         # Define model
-        self.model = CriticLSTM(num_classes = 2, input_size=1, hidden_size=51, num_layers=3) # With all default values
-        self.model = self.model.to(device)
+        self.model = CriticLSTM(seq_len=seq_len) # With all default values
+        self.model.to(device)
         
         #* Construct model from scratch
         # Define classwide parameters
         self.convergence_threshold = conv_val  
         self.load_trained = load_trained 
         
-        url = '1RxQz6Wcl6xzuEhhB7em9L6z9nc4v5QTi'
-        
         # Predefine some hyper parameters for training
         self.lr = 0.001
-        self.loss_fn = nn.CrossEntropyLoss() # Chosen based on https://machinelearningmastery.com/loss-functions-in-pytorch-models/
+        self.loss_fn = nn.BCELoss() # Chosen based on https://machinelearningmastery.com/loss-functions-in-pytorch-models/
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         # Load model if load_trained is True, else construct the model
         if (load_trained):
+            
+            file_id = '1d2t0v5qfzYEnuiuJsd9XbukSBQelO1uM'
             
             #* Load a pretrained model
             """
@@ -126,14 +150,12 @@ class Critic(CriticBase):
             else, construct the model
             """
             #* As suggested by Teslim from the class
-            gdd.download_file_from_google_drive(file_id=url,
-                                    dest_path='./az_critic_final.pth',
-                                    unzip=True)
+            gdd.download_file_from_google_drive(file_id=file_id, dest_path='./az_crt.pth', unzip=True)
+            self.model.load_state_dict(torch.load("./az_crt.pth"))
+            
 
-            # gdown.download(url, output, quiet=False)
-            self.model.load_state_dict(torch.load("./az_critic_final.pth"))
-        
         print(self.model)
+        print()
     
     # WORKS DO NOT DELETE
     # Inherited from the BaseModel class
@@ -150,38 +172,18 @@ class Critic(CriticBase):
         loss = None
         
         #in_seq , in_label = x['sequence'].to(device) , x['label'].to(device) # Without this causes an error
-        #! in_seq may be a row vector style, we need to reshape it
-        in_seq , in_label = x
+        # TensorDataset(x_train_tensors, y_train_tensors) doesn't make a tuple of two tensors
+        in_seq = x[0].clone().long().to(device) # Make a clone, convert to batched input, [1,50]
+        y_test = x[1].clone().float().to(device) # in CPU
         
-        dims = in_seq.size()
-        bz, seq_len = dims[0],dims[1]
-        chx = 1 # Default
-
-        desired_shape = (bz, seq_len, chx)
-        label_2d = torch.randn(bz, 2) # To convert discrete 1 and 0 to [1,0] and [0,1] encodings
-
-        # Reshape if necessary
-        if in_seq.shape != torch.Size(desired_shape):
-            in_seq = in_seq.view(bz,seq_len,chx)
-        
-        # According to professor, 
-        # Label is a tensor of n values (0 or 1) where n is the batch size. 
-        # We are converting them into one-hot encoding of 2 bits i.e 2 classes
-        for idx, lbs in enumerate(in_label):
-            label_2d[idx] = torch.tensor([1, 0]).float() if lbs.item() else torch.tensor([0, 1]).float()
-        
-        in_seq = in_seq.to(device)
-        label_2d = label_2d.to(device)
         output = self.model(in_seq)
-        loss = self.loss_fn(output, label_2d)
-
+        loss = self.loss_fn(output, y_test)
+        
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-
-        print(f"Loss for this batch: -- {loss.item()}")
-
-        return loss
+        
+        return loss # scalar tensor, mean loss on this batch
     
     #! TODO prepare when Task 2 is done
     def score(self, x):
@@ -190,17 +192,28 @@ class Critic(CriticBase):
         :param x: a music sequence
         :return: the score between 0 and 1 that reflects the quality of the music: the closer to 1, the better
         '''
-        # Pseudocode
-        # Run the model
-        # Run sigmoid function
-        # Report from the two classes, report the class with highest score?
         
-        self.model.train(False)
+        good_music_thres = 0.9 # Score above 0.9 is considered good music
+
+        # Define work variable
+        x_in = None # Tensor that we will use if we need to reshape
+
+        # Make sure the input is batched
+        if (x.dim() == 1):
+            # 2D tensor need to make it a tensor of shape [1,seq_len]
+            x = x.view(1,-1).long().to(device)
+        else:
+            x = x.long().to(device)
+        
+        output = 0.0
         with torch.no_grad():
-            output = self.model(x.to(device))
-            predicted_index = torch.argmax(output, dim=1)
-            predicted_index ^= 1 # index 0 is good and index 1 is bad 
-        return predicted_index
+            output = self.model(x)
+        
+        output = output.item()
+        if (output < good_music_thres):
+            output = 0.0
+        
+        return output
 
 # ------------------------------------------------ EOF Critic -------------------------------------------------------
 
@@ -441,28 +454,3 @@ class Composer(ComposerBase):
 
     
     # ------------------------------------------------ EOF Composer -------------------------------------------------------
-
-# ------------------------------------------------------------ EOF --------------------------------------------------
-#! # WORKS DO NOT DELETE
-    # # Inherited from the BaseModel class
-    # # Called by fit method
-    # #* Will be called multiple times by the fit method
-    # def train(self, x):
-        
-    #     """
-    #     Train the model on ONE batch of data
-    #     :param x: train data: for Critic , x will be a tuple of two tensors (data, label)\
-    #     x is essentially one batch of data
-    #     :return: (mean) loss of the model on the batch
-    #     """
-    #     in_seq , in_label = x['sequence'].to(device) , x['label'].to(device) # Without this causes an error
-    #     output = self.model(in_seq)
-    #     loss = self.loss_fn(output, in_label)
-
-    #     self.optimizer.zero_grad()
-    #     loss.backward()
-    #     self.optimizer.step()
-
-    #     return loss
-
-
