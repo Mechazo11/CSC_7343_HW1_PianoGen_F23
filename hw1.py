@@ -1,6 +1,8 @@
 # TODO add shebang to allow only python3 execution
 # hw1 driver script
 # Author: Azmyin Md. Kamal
+# CSC 7343 Fall 2023
+# HW 1
 
 """
 TODO answer to Task 3
@@ -14,12 +16,6 @@ TODO answer to Task 3
 * Choice of loss function https://machinelearningmastery.com/loss-functions-in-pytorch-models/
 """
 
-"""
-* Important implementation details
-- max_len = 200, this is a design choice
-- number of LSTM layers - 3, this is a design choice
-- hidden_size -- needs to be found out by trial and error, starting with 10
-"""
 
 # Imports
 from model_base import CriticBase, ComposerBase # Import templates
@@ -153,13 +149,8 @@ class Critic(CriticBase):
             gdd.download_file_from_google_drive(file_id=file_id, dest_path='./az_crt.pth', unzip=True)
             self.model.load_state_dict(torch.load("./az_crt.pth"))
             
-
         print(self.model)
-        print()
     
-    # WORKS DO NOT DELETE
-    # Inherited from the BaseModel class
-    # Called by fit method
     #* Will be called multiple times by the fit method
     def train(self, x):
         
@@ -185,35 +176,47 @@ class Critic(CriticBase):
         
         return loss # scalar tensor, mean loss on this batch
     
-    #! TODO prepare when Task 2 is done
     def score(self, x):
         '''
         Compute the score of a music sequence
-        :param x: a music sequence
+        :param x: a music sequence, torch tensor
         :return: the score between 0 and 1 that reflects the quality of the music: the closer to 1, the better
         '''
-        
+        # Global work variables
         good_music_thres = 0.9 # Score above 0.9 is considered good music
-
-        # Define work variable
-        x_in = None # Tensor that we will use if we need to reshape
-
-        # Make sure the input is batched
-        if (x.dim() == 1):
-            # 2D tensor need to make it a tensor of shape [1,seq_len]
-            x = x.view(1,-1).long().to(device)
-        else:
-            x = x.long().to(device)
-        
+        bz_size = 0
         output = 0.0
-        with torch.no_grad():
-            output = self.model(x)
         
-        output = output.item()
-        if (output < good_music_thres):
-            output = 0.0
-        
-        return output
+        if (x.dim() == 1):
+            # 2D tensor passed, need to convert it to a batched 3D tensor
+            # How many batches can be made
+            if (x.shape[0] % 50 == 0):
+                bz_cnt = x.shape[0] // 50
+                x_in = x.clone().view(bz_cnt,1,50).long().to(device)
+
+                # Run through the batch and compute mean score
+                if(bz_cnt>0):
+                    running_score = []
+                    # Run through each sequence individually
+                    for idx, seq_in in enumerate(x_in):
+                        score = None # Initialize
+                        score = self.model(seq_in)
+                        score = score.item()
+                        if (score < good_music_thres):
+                            score = 0.0
+                        running_score.append(score)
+                    
+                    output = np.mean(np.array(running_score))
+                    return output
+
+            else:
+                print(f"Please use cps.compose(n = 100,200,250..) a number divisible by 50")
+                print(f"Returning 0.0 .......")
+                return output
+        else:
+            # TODO logic for direct batched input
+            # Maybe redundant
+            pass
 
 # ------------------------------------------------ EOF Critic -------------------------------------------------------
 
@@ -299,7 +302,7 @@ class Composer(ComposerBase):
 
         # Define model
         self.model = ComposerLSTM(seq_len=seq_len)
-        self.model = self.model.to(device)
+        self.model.to(device)
         
         # Set a convergence threshold for loss
         self.convergence_threshold = conv_val
