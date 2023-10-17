@@ -1,12 +1,28 @@
-# TODO add shebang to allow only python3 execution
-# hw1 driver script
+# CSC 7343 Fall 2023 HW1 LSTM Composer and Critic to generate piano midis
 # Author: Azmyin Md. Kamal
-# CSC 7343 Fall 2023
-# HW 1
+# Version: 1.0
+# Date: 10/17/23
 
 """
-TODO answer to Task 3
+Q1: What is the average score of the generated music?
+Ans: For an experiment that had Composer generate 100 midi files, average score was 0.85. 
+
+Q2: One idea to improve the quality of your composed music is to combine the composer with the critic to form a GAN and train the GAN to obtain a better composer. What is the major difficulty to train such a GAN?
+Ans: In my experiments, the Critic (Discriminator) is too good having reached <10^6 order accuracy on 80% training data by first 10 epohcs. 
+In contrast, the Composer (Generator) required over 500 epochs to reach an error around ~1.005. 
+Thus the major problem may be the "vanishing gradient problem" i.e the gradients for generator diminishes rapidly and the generator learns nothing
+
+Q3: Discuss a possible solution that may overcome this major difficulty. (You don't need to implement/code the solution. You may just describe it and give some justification why you think it may work.)
+Ans: Implement the Wasserstien loss function [1] and implement Wasserstein GAN with gradient penalty. According to [2], WGAN fills areas of diminishing gradients with values
+and smooths it out everywhere. Hence the generator is able to keep learning even if its not doing a good enough job and the Discriminator is really good at the beginning.
 """
+
+"""
+* Referennces
+[1] Lecture slides "GAN 2" by Professor Jian Zhang, CSC 7343 Fall 2023
+[2] "GAN — Wasserstein GAN & WGAN-GP" by Jonathan Hui. url: https://jonathan-hui.medium.com/gan-wasserstein-gan-wgan-gp-6a1a2aa1b490
+"""
+
 
 """
 #* Important Tutorials:
@@ -38,19 +54,10 @@ from sklearn.model_selection import train_test_split
 from google_drive_downloader import GoogleDriveDownloader as gdd
 import os
 
-# Debugging functions
-
-# ---------------------------------------------------------
-def debug_quit():
-    print(f"DEBUG Quit")
-    sys.exit(0)
-# ---------------------------------------------------------
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 # print(f"Using device: {device}")
-
 root = './' # Location of the root directory
+
 
 class CriticLSTM(nn.Module):
     def __init__(self, seq_len = 50, hidden_size=64, num_layers=2, dense_size = 128, emb_dim = 10, vocab_size = 382): # Initialize with some default values
