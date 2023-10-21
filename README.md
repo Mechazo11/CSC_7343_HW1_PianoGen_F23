@@ -1,23 +1,15 @@
 # CSC_7343_HW1_PianoGen_F23
-Repository for HW1. It entailed creating a LSTM Midi composer and a MIDI critic
-
-* TODO how to use
-* TODO update with critic testing code
-
-
-* Description from Dr. Zhang's class
-# 7343 Homework 1
-
-In this homework, your goal is to implement and train two LSTM models, one called piano music composer and the other called critic.  
+Repository for mini project for LSU's CSC 7343 class, Homework 1.
+In this homework, your goal is to implement and train two LSTM models, one called piano music composer and the other called critic. 
+From Dr. Zhang`s repo, [PianoGen](https://github.com/zhang8/PianoGen), the file "model_base.py" contains the base classes. These templates had to be used as is and the class names were required to be kept fixed. The file "midi2seq.py" contains a set of functions that help to process the midi data and convert the data to sequences of events.  
 
 ## Data
-The piano data (in midi format) can be downloaded from: 
-https://storage.googleapis.com/magentadata/datasets/maestro/v1.0.0/maestro-v1.0.0-midi.zip
+The piano data (in midi format) can be downloaded from: [MIDI data](https://storage.googleapis.com/magentadata/datasets/maestro/v1.0.0/maestro-v1.0.0-midi.zip) By default, when unzipped, the data will be put into the main directory named "maestro-v1.0.0".
 
-By default, when unzipped, the data will be put into a directory named "maestro-v1.0.0".
+## How to use?
+Open and run the ```all_tasks_driver.ipynb``` notebook to train the two LSTMS and test performance of composer against critc.
 
-The file "midi2seq.py" contains a set of functions that help to process the midi data and convert the data to sequences of events.   
-The file "model_base.py" contains the base classes that you should inherit when implementing the following model classes.
+# CSC 7343 Fall 2023 homework 1 description from Dr. Zhang's repo
 
 ## Task 1: Critic
 (Class "Critic" should be a subclass of the class CriticBase. You must use the exact class name.)
