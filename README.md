@@ -3,6 +3,8 @@ Repository for mini project for LSU's CSC 7343 class, Homework 1.
 In this homework, your goal is to implement and train two LSTM models, one called piano music composer and the other called critic. 
 From Dr. Zhang`s repo, [PianoGen](https://github.com/zhang8/PianoGen), the file "model_base.py" contains the base classes. These templates had to be used as is and the class names were required to be kept fixed. The file "midi2seq.py" contains a set of functions that help to process the midi data and convert the data to sequences of events.  
 
+Got 98/100 for this submission..yaee
+
 ## Data
 The piano data (in midi format) can be downloaded from: [MIDI data](https://storage.googleapis.com/magentadata/datasets/maestro/v1.0.0/maestro-v1.0.0-midi.zip) By default, when unzipped, the data will be put into the main directory named "maestro-v1.0.0".
 
