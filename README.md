@@ -1,6 +1,6 @@
 # CSC_7343_HW1_PianoGen_F23
 Repository for mini project for LSU's CSC 7343 class, Homework 1.
-In this homework, your goal is to implement and train two LSTM models, one called piano music composer and the other called critic. 
+In this homework, the goal is to implement and train two LSTM models, one called piano music composer and the other called critic. 
 From Dr. Zhang`s repo, [PianoGen](https://github.com/zhang8/PianoGen), the file "model_base.py" contains the base classes. These templates had to be used as is and the class names were required to be kept fixed. The file "midi2seq.py" contains a set of functions that help to process the midi data and convert the data to sequences of events.  
 
 Got 98/100 for this submission..yaee
