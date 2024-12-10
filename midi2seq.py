@@ -12,6 +12,7 @@ import random
 import glob
 import numpy as np
 import pretty_midi
+import os
 
 class Event:
     def __init__(self, s, t, v):
@@ -160,13 +161,20 @@ def process_midi_seq(all_midis=None, datadir='data', n=10000, maxlen=50):
     :param maxlen: the length of the segments
     :return: numpy array of shape [n', max_len] for the segments. n' tries to be close to n but may not be exactly n.
     '''
+
     if all_midis is None:
-        all_midis = glob.glob(datadir+'/maestro-v1.0.0/**/*.midi')
+        search_path = os.path.join(datadir, 'maestro-v1.0.0-midi', '**', '*.midi')
+        # all_midis = glob.glob(datadir+'/maestro-v1.0.0-midi/**/*.midi')
+        all_midis = glob.glob(search_path, recursive=True)
+        print("Looking for files in:", search_path)
         random.seed(42)    # for debug purpose, you can pass a fix number when calling seed()
         random.shuffle(all_midis)
 
     data = []
     k = 0
+
+    print(len(all_midis))
+
     for m in all_midis:
         seq = segment(piano2seq(m), maxlen)
         data.append(seq)
